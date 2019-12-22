@@ -122,7 +122,12 @@ class ReportController extends Controller
 
             $this->userService->onlyEmployee($employee);
 
-            $this->reportService->addReport($employee, $request->input('scores'), $request->input('rules'));
+            $this->reportService->addReport(
+                $employee,
+                $request->input('scores'),
+                $request->input('rules'),
+                trim($request->input('comment'))
+                );
         } catch (\Exception $e) {
             //if not created, redirect to reports index and show error message
             Session::flash('error', $e->getMessage());
@@ -175,7 +180,12 @@ class ReportController extends Controller
         $this->validateReport($request);
 
         try {
-            $this->reportService->reportParticipate($id, $request->scores, $request->rules);
+            $this->reportService->reportParticipate(
+                $id,
+                $request->scores,
+                $request->rules,
+                trim($request->comment)
+                );
         } catch (\Exception $e) {
             //report not found, redirect to reports index and show error message
             Session::flash('error', $e->getMessage());
@@ -202,18 +212,21 @@ class ReportController extends Controller
     {
         try {
             //Load report with scores
-            $report = $this->reportService->reportRepository->getItem($id, ['scores']);
-
+            $report = $this->reportService->reportRepository->getItem($id, ['scores','comments']);
             $this->reportService->allowedView($report, Auth::user());
 
             //List Data in rules x reviewer matrix
             extract($this->reportService->getReviewsMatrix($report));
+
+            //Get a Collection of Comments on report (empty if no comments)
+            $comments= $this->reportService->reportRepository->getAllComments($report);
+            
         } catch (\Exception $e) {
             Session::flash('error', $e->getMessage());
             return redirect()->route('report.index');
         }
 
-        return view('reports.show', compact('reviewersScores', 'reviewers', 'rules', 'id', 'avgScores', 'report'));
+        return view('reports.show', compact('reviewersScores', 'reviewers', 'rules', 'id', 'avgScores', 'report','comments'));
     }
 
     /**
@@ -225,8 +238,17 @@ class ReportController extends Controller
     {
         try {
             //Get scores recorded by authenticated user who attempted edit
-            $reportWithScores = $this->reportService->reportRepository->getReviewerScores($id, Auth::user()->id);
-
+            $reportWithScores = $this->reportService->reportRepository
+            ->getReviewerScores($id, Auth::user()->id, ['comments']);
+            
+            //Get Comment of logged in user on report
+            $comment = $this->reportService->reportRepository
+            ->getUserComment($reportWithScores);
+            //check if there is a comment for logged in user
+            if($comment){
+                $comment = $comment->comment;
+            }
+           
             $this->reportService->openModification($reportWithScores);
         } catch (\Exception $e) {
             Session::flash('error', $e->getMessage());
@@ -235,7 +257,7 @@ class ReportController extends Controller
 
         //Pass Counter to view
         $counter = 0;
-        return view('reports.edit', compact(['reportWithScores', 'id', 'counter']))
+        return view('reports.edit', compact(['reportWithScores', 'id', 'counter', 'comment']))
             ->with('reportWithScores', $reportWithScores);
     }
 
@@ -252,7 +274,11 @@ class ReportController extends Controller
         $this->validateReport($request);
 
         try {
-            $this->reportService->updateReport($id, $request->scores, $request->rules);
+            $this->reportService->updateReport(
+                $id,
+                $request->scores,
+                $request->rules,
+                trim($request->comment));
         } catch (\Exception $e) {
             Session::flash('error', $e->getMessage());
             return redirect(route('report.index'));
@@ -306,7 +332,7 @@ class ReportController extends Controller
     public function listData(Request $request, $userId = null)
     {
         $isAdmin = Auth::user()->hasRole('admin');
-        $reports = $this->reportService->reportRepository->getReportsForAUserScope($isAdmin, Auth::id());
+        $reports = $this->reportService->reportRepository->getReportsForAUserScope($isAdmin, Auth::id(), $userId);
 
         return Datatables::of($reports)
             ->addColumn('action', function ($report) use ($isAdmin) {

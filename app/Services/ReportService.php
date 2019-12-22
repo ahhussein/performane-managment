@@ -8,6 +8,7 @@ use App\Repositories\PerformanceRule\PerformanceRuleInterface;
 use App\Repositories\Report\ReportInterface;
 use App\Repositories\User\UserInterface;
 use Illuminate\Support\Facades\Auth;
+use App\Repositories\Comment\CommentInterface;
 
 class ReportService
 {
@@ -23,6 +24,11 @@ class ReportService
      */
     public $reportRepository;
 
+     /**
+     * Comment Repository
+     * @var CommentInterface
+     */
+    public $commentRepository;
     /**
      * PerformanceRule Repository
      * @var PerformanceRuleInterface
@@ -38,12 +44,14 @@ class ReportService
     public function __construct(
         ReportInterface $reportRepository,
         PerformanceRuleInterface $performanceRuleRepository,
-        UserInterface $userRepository
+        UserInterface $userRepository,
+        CommentInterface $commentRepository
     ) {
         $this->redirectTo = null;
         $this->reportRepository = $reportRepository;
         $this->performanceRuleRepository = $performanceRuleRepository;
         $this->userRepository = $userRepository;
+        $this->commentRepository = $commentRepository;
     }
 
     /**
@@ -53,7 +61,7 @@ class ReportService
      * @param $rules
      * @throws \Exception
      */
-    public function addReport($employee, $scores, $rules)
+    public function addReport($employee, $scores, $rules, $comment)
     {
         //Get the max possible score
         $maxScore = $this->performanceRuleRepository->getMaxScoreByType($employee->employee_type);
@@ -63,8 +71,29 @@ class ReportService
 
         //Attach scores to report
         $this->addScores($scores, $rules, $report, $employee);
-    }
 
+        //Check if there is a comment
+        if(!empty($comment))
+        {
+            $this->addComment($comment, $report);
+        }
+    }
+    /**
+     * Create comment then attach it to report
+     * @param string $comment comment text
+     * @param Report $report  Report Object
+     */
+    public function addComment($comment, $report)
+    {
+        //Create Comment
+        $comment_created = $this->commentRepository->addItem([
+            'comment' => $comment,
+            'user_id' =>Auth::id()
+            ]);
+
+        //Attach Comment to Report
+        $report->comments()->attach($comment_created->id);        
+    }
     /**
      * Participate in stored report, if employee being reviewed is participating
      * consider his evaluation and close the report
@@ -73,7 +102,7 @@ class ReportService
      * @param $rules
      * @throws \Exception
      */
-    public function reportParticipate($id, $scores, $rules)
+    public function reportParticipate($id, $scores, $rules, $comment)
     {
         $report = $this->reportRepository->getItem($id);
 
@@ -86,6 +115,11 @@ class ReportService
         //Attach scores to report
         $this->addScores($scores, $rules, $report, $employee);
 
+        //Check if there is a comment
+        if(!empty($comment))
+        {
+            $this->addComment($comment, $report);
+        }
         //If employee is evaluating himself, calculate overall score and prevent further participation
         if ($employee->id == Auth::id()) {
             $this->closeReport($report);
@@ -101,16 +135,33 @@ class ReportService
      * @param $id
      * @param $scores
      * @param $rules
+     * @param $comment string new comment written
      * @throws \Exception
      */
-    public function updateReport($id, $scores, $rules)
+    public function updateReport($id, $scores, $rules, $comment)
     {
-        $report = $this->reportRepository->getItem($id);
+        $report = $this->reportRepository->getItem($id, ['comments']);
         $this->openModification($report);
         $employee = $this->getReportEmployee($report);
 
         $update = true;
         $this->addScores($scores, $rules, $report, $employee, $update);
+
+        //get user comment (return null if there is no comment before)
+        $user_comment = $this->reportRepository->getUserComment($report);
+        //update comment if existed
+        if($user_comment)
+        {
+            //update comment
+            $this->commentRepository->editItem($user_comment->id, ['comment' => $comment]);
+            return;
+        }
+
+        //creates new comment if not comment isn't empty string
+        if(!empty($comment))
+        {
+            $this->addComment($comment, $report);
+        }
     }
 
     /**
@@ -312,6 +363,9 @@ class ReportService
         try {
             //Show participate link if only user can participate
             $this->canParticipate($report, $loggedInUser);
+            //Still open for participation?
+            $this->reportService->openModification($report);
+
             $participateLink =
                 "<a href=" . route('report.getParticipate', $report->id) .
                 " class='btn btn-xs btn-success'><i class='glyphicon glyphicon-pencil'></i> " .

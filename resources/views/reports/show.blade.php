@@ -54,6 +54,20 @@
                 </tbody>
             </table>
         </div>
+        @if (count($comments) > 0)
+            @foreach ($comments as $comment)
+                <div class="form-group">
+                        <p title="{{(new Carbon\Carbon($comment->created_at))
+                            ->format('l, d M Y, h:i:s A')}}">
+                            <strong>{{ $comment->user->name }}</strong> Wrote</p>
+                        <blockquote>
+                        <p class="lead">{{$comment->comment}}</p>
+                        </blockquote>
+                </div>
+            @endforeach
+        @endif
+        
+
 @endsection
 @section('extra-js')
     <script type="text/javascript" src="{{asset('/js/star-rating.min.js')}}"></script>
